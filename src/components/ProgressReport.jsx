@@ -12,7 +12,7 @@ export default function ProgressReport({ reports }) {
         <thead>
           <tr>
             <th>Test & Subject</th>
-            <th>Timing</th>
+            <th> Timing </th>
             <th>Questions (Att./Unatt.)</th>
             <th>Marks</th>
             <th>Percentage</th>
