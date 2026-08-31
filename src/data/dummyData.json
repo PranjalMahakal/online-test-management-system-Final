@@ -1,5 +1,12 @@
 {
   "users": [
+    {
+      "id": 100,
+      "name": "Dr. Arvind Kulkarni",
+      "email": "admin@test.com",
+      "password": "admin",
+      "role": "admin"
+    },
     { "id": 1, "name": "Pranali Jadhav", "email": "pranali@test.com", "password": "123456", "role": "teacher" },
     { "id": 2, "name": "Vishal More", "email": "vishal@test.com", "password": "123456", "role": "teacher" },
     { "id": 3, "name": "Shital Ghule", "email": "shital@test.com", "password": "123456", "role": "teacher" },
@@ -12,6 +19,8 @@
   "initialTests": [
     {
       "id": 101,
+      "teacherId": 1,
+      "teacherName": "Pranali Jadhav",
       "title": "JavaScript Basics",
       "subject": "Web Development",
       "duration": 5,

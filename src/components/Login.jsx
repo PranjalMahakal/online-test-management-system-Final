@@ -249,6 +249,73 @@ export default function Login({ onLogin }) {
             >
               Login
             </button>
+            <div style={{ marginTop: '22px', borderTop: '1px dashed #e2e8f0', paddingTop: '16px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', marginBottom: '10px', textAlign: 'center', letterSpacing: '0.5px' }}>
+                Quick Demo Credentials
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail('admin@test.com');
+                    setPassword('admin');
+                  }}
+                  style={{
+                    background: '#ede9fe',
+                    color: '#4338ca',
+                    border: '1px solid #c7d2fe',
+                    borderRadius: '8px',
+                    padding: '8px 4px',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  👑 Admin
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail('pranali@test.com');
+                    setPassword('123456');
+                  }}
+                  style={{
+                    background: '#e0f2fe',
+                    color: '#0369a1',
+                    border: '1px solid #bae6fd',
+                    borderRadius: '8px',
+                    padding: '8px 4px',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  👨‍🏫 Teacher
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail('radha@test.com');
+                    setPassword('123456');
+                  }}
+                  style={{
+                    background: '#dcfce7',
+                    color: '#15803d',
+                    border: '1px solid #bbf7d0',
+                    borderRadius: '8px',
+                    padding: '8px 4px',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  🎓 Student
+                </button>
+              </div>
+            </div>
           </form>
 
           <p
@@ -256,7 +323,7 @@ export default function Login({ onLogin }) {
               textAlign: 'center',
               color: '#94a3b8',
               fontSize: '12px',
-              marginTop: '22px',
+              marginTop: '16px',
               marginBottom: 0
             }}
           >

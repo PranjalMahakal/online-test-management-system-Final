@@ -3,6 +3,7 @@ import dummyData from './data/dummyData.json';
 import Login from './components/Login';
 import TeacherDashboard from './components/TeacherDashboard';
 import StudentDashboard from './components/StudentDashboard';
+import AdminDashboard from './components/AdminDashboard';
 import './App.css';
 
 export default function App() {
@@ -41,15 +42,32 @@ export default function App() {
     return <Login onLogin={setCurrentUser} />;
   }
 
-  return currentUser.role === 'teacher' ? (
-    <TeacherDashboard
-      user={currentUser}
-      tests={tests}
-      setTests={setTests}
-      results={results}
-      onLogout={handleLogout}
-    />
-  ) : (
+  if (currentUser.role === 'admin') {
+    return (
+      <AdminDashboard
+        user={currentUser}
+        users={dummyData.users}
+        tests={tests}
+        results={results}
+        setTests={setTests}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  if (currentUser.role === 'teacher') {
+    return (
+      <TeacherDashboard
+        user={currentUser}
+        tests={tests}
+        setTests={setTests}
+        results={results}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  return (
     <StudentDashboard
       user={currentUser}
       tests={tests}
