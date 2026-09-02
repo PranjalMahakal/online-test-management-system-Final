@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 
 export default function AdminDashboard({ user, users = [], tests = [], results = [], setTests, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -15,9 +15,97 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Sorting for Student Performance Tab
+  const [studentSortBy, setStudentSortBy] = useState('highest');
+
   // Extract lists
   const teacherList = useMemo(() => users.filter((u) => u.role === 'teacher'), [users]);
   const studentList = useMemo(() => users.filter((u) => u.role === 'student'), [users]);
+
+  // Computed Student Performance Metrics with Dynamic Sorting
+  const sortedStudents = useMemo(() => {
+    // 1. Calculate each student's performance dynamically from test results
+    const list = studentList.map((student) => {
+      const studentSubmissions = results.filter(
+        (r) => r.studentId === student.id || r.studentName === student.name
+      );
+      const passedCount = studentSubmissions.filter((r) => r.status === 'Pass').length;
+      const failedCount = studentSubmissions.filter((r) => r.status === 'Fail').length;
+
+      // Cumulative marks obtained across all attempted tests
+      const totalMarksObtained = studentSubmissions.reduce(
+        (sum, r) => sum + Number(r.marksObtained || 0),
+        0
+      );
+      // Cumulative maximum marks across all attempted tests
+      const totalMaxMarks = studentSubmissions.reduce(
+        (sum, r) => sum + Number(r.totalMarks || 0),
+        0
+      );
+
+      // (Total marks obtained across all attempted tests / Total maximum marks across all attempted tests) * 100
+      const percentageNum = totalMaxMarks > 0
+        ? (totalMarksObtained / totalMaxMarks) * 100
+        : (studentSubmissions.length > 0
+            ? studentSubmissions.reduce((sum, r) => sum + parseFloat(r.percentage || 0), 0) / studentSubmissions.length
+            : 0);
+      const avgPct = percentageNum.toFixed(1);
+      const testsAttempted = studentSubmissions.length;
+
+      return {
+        student,
+        submissions: studentSubmissions,
+        passedCount,
+        failedCount,
+        totalMarksObtained,
+        totalMaxMarks,
+        percentageNum,
+        avgPct,
+        testsAttempted
+      };
+    });
+
+    // 2. Sort students based on selected sorting option
+    switch (studentSortBy) {
+      case 'lowest':
+        // Lowest Performance -> Sorts low to high (Ascending)
+        return list.sort((a, b) => {
+          if (a.percentageNum !== b.percentageNum) {
+            return a.percentageNum - b.percentageNum;
+          }
+          return a.student.name.localeCompare(b.student.name);
+        });
+
+      case 'tests':
+        // Most Tests Attempted -> Sorts by total tests attempted (Descending)
+        return list.sort((a, b) => {
+          if (b.testsAttempted !== a.testsAttempted) {
+            return b.testsAttempted - a.testsAttempted;
+          }
+          if (b.percentageNum !== a.percentageNum) {
+            return b.percentageNum - a.percentageNum;
+          }
+          return a.student.name.localeCompare(b.student.name);
+        });
+
+      case 'name':
+        // Alphabetical (A-Z) -> Sorts by student name
+        return list.sort((a, b) => a.student.name.localeCompare(b.student.name));
+
+      case 'highest':
+      default:
+        // Highest Performance (Default) -> Sorts high to low (Descending)
+        return list.sort((a, b) => {
+          if (b.percentageNum !== a.percentageNum) {
+            return b.percentageNum - a.percentageNum;
+          }
+          if (b.testsAttempted !== a.testsAttempted) {
+            return b.testsAttempted - a.testsAttempted;
+          }
+          return a.student.name.localeCompare(b.student.name);
+        });
+    }
+  }, [studentList, results, studentSortBy]);
 
   // Total calculations
   const totalTeachers = teacherList.length;
@@ -30,7 +118,7 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
   const overallPassingRate = totalSubmissions > 0 ? ((totalPassed / totalSubmissions) * 100).toFixed(1) : '0.0';
 
   // Helper to resolve teacher for a test
-  const getTeacherForTest = (testObj) => {
+  const getTeacherForTest = useCallback((testObj) => {
     if (!testObj) return 'Pranali Jadhav';
     if (testObj.teacherName) return testObj.teacherName;
     if (testObj.teacherId) {
@@ -38,16 +126,43 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
       if (teacher) return teacher.name;
     }
     return 'Faculty / Teacher';
-  };
+  }, [users]);
 
   // Helper to resolve teacher for a submission result
-  const getTeacherForResult = (resultObj) => {
+  const getTeacherForResult = useCallback((resultObj) => {
     const matchedTest = tests.find(
       (t) => t.id === resultObj.testId || t.title === resultObj.testName
     );
     if (matchedTest) return getTeacherForTest(matchedTest);
     return 'Faculty / Teacher';
-  };
+  }, [tests, getTeacherForTest]);
+
+  // Helper to safely extract or reconstruct question snapshots for review
+  const getSubmissionSnapshots = useCallback((sub) => {
+    if (!sub) return [];
+    if (sub.questionSnapshots && sub.questionSnapshots.length > 0) {
+      return sub.questionSnapshots;
+    }
+    const matchedTest = tests.find((t) => t.id === sub.testId || t.title === sub.testName);
+    if (!matchedTest || !matchedTest.questions) return [];
+    const userAnswers = sub.userAnswers || {};
+    return matchedTest.questions.map((q, i) => {
+      const selectedOption = userAnswers[i] !== undefined ? userAnswers[i] : null;
+      const isSkipped = selectedOption === null || selectedOption === undefined;
+      const isCorrect = !isSkipped && selectedOption === q.correctOption;
+      return {
+        id: q.id || i + 1,
+        questionText: q.questionText,
+        options: q.options || [],
+        correctOption: q.correctOption,
+        selectedOption,
+        isCorrect,
+        isSkipped,
+        marksEarned: isCorrect ? (q.marks || 1) : 0,
+        marks: q.marks || 1
+      };
+    });
+  }, [tests]);
 
   // Unique subjects for filter
   const uniqueSubjects = useMemo(() => {
@@ -88,7 +203,7 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
 
       return true;
     });
-  }, [results, filterSubject, filterStatus, filterTeacher, searchQuery, tests, users]);
+  }, [results, filterSubject, filterStatus, filterTeacher, searchQuery, getTeacherForResult]);
 
   // Toggle publish status by admin (optional super-admin authority)
   const handleToggleTestPublish = (testId) => {
@@ -888,6 +1003,70 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
 
               {/* Students Table Card */}
               <div style={cardStyle}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '20px',
+                    flexWrap: 'wrap',
+                    gap: '14px'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: '800', color: '#0f172a', fontSize: '16px' }}>
+                      Student Performance Rankings
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                      {studentSortBy === 'highest'
+                        ? 'Sorted by highest cumulative percentage (Rank 1 at top)'
+                        : studentSortBy === 'lowest'
+                        ? 'Sorted by lowest cumulative percentage'
+                        : studentSortBy === 'tests'
+                        ? 'Sorted by total tests attempted'
+                        : 'Sorted alphabetically by student name'}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <label
+                      htmlFor="student-sort-select"
+                      style={{
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        color: '#64748b',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px'
+                      }}
+                    >
+                      Sort By:
+                    </label>
+                    <select
+                      id="student-sort-select"
+                      value={studentSortBy}
+                      onChange={(e) => setStudentSortBy(e.target.value)}
+                      style={{
+                        padding: '9px 16px',
+                        borderRadius: '10px',
+                        border: '1.5px solid #cbd5e1',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        color: '#0f172a',
+                        background: '#ffffff',
+                        cursor: 'pointer',
+                        outline: 'none',
+                        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+                        minWidth: '220px'
+                      }}
+                    >
+                      <option value="highest">Highest Performance (Default)</option>
+                      <option value="lowest">Lowest Performance</option>
+                      <option value="tests">Most Tests Attempted</option>
+                      <option value="name">Alphabetical (A-Z)</option>
+                    </select>
+                  </div>
+                </div>
+
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
@@ -902,14 +1081,7 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
                       </tr>
                     </thead>
                     <tbody>
-                      {studentList.map((student) => {
-                        const studentSubmissions = results.filter((r) => r.studentId === student.id || r.studentName === student.name);
-                        const passedCount = studentSubmissions.filter((r) => r.status === 'Pass').length;
-                        const failedCount = studentSubmissions.filter((r) => r.status === 'Fail').length;
-                        const avgPct = studentSubmissions.length > 0
-                          ? (studentSubmissions.reduce((sum, r) => sum + parseFloat(r.percentage || 0), 0) / studentSubmissions.length).toFixed(1)
-                          : '0.0';
-
+                      {sortedStudents.map(({ student, submissions: studentSubmissions, passedCount, failedCount, avgPct }, index) => {
                         return (
                           <tr key={student.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                             <td style={{ padding: '16px 18px' }}>
@@ -931,7 +1103,66 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
                                   {student.name.split(' ').map((n) => n[0]).join('')}
                                 </div>
                                 <div>
-                                  <div style={{ fontWeight: '800', color: '#0f172a', fontSize: '14px' }}>{student.name}</div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                    <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '14px' }}>{student.name}</span>
+                                    {studentSortBy === 'highest' && index === 0 && (
+                                      <span
+                                        style={{
+                                          background: 'linear-gradient(135deg, #fef08a 0%, #fde047 100%)',
+                                          color: '#854d0e',
+                                          border: '1px solid #facc15',
+                                          padding: '2px 8px',
+                                          borderRadius: '999px',
+                                          fontSize: '11px',
+                                          fontWeight: '800',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px',
+                                          boxShadow: '0 1px 3px rgba(234, 179, 8, 0.2)'
+                                        }}
+                                      >
+                                        🥇 Rank 1
+                                      </span>
+                                    )}
+                                    {studentSortBy === 'highest' && index === 1 && (
+                                      <span
+                                        style={{
+                                          background: 'linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%)',
+                                          color: '#334155',
+                                          border: '1px solid #cbd5e1',
+                                          padding: '2px 8px',
+                                          borderRadius: '999px',
+                                          fontSize: '11px',
+                                          fontWeight: '800',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px',
+                                          boxShadow: '0 1px 3px rgba(100, 116, 139, 0.15)'
+                                        }}
+                                      >
+                                        🥈 Rank 2
+                                      </span>
+                                    )}
+                                    {studentSortBy === 'highest' && index === 2 && (
+                                      <span
+                                        style={{
+                                          background: 'linear-gradient(135deg, #ffedd5 0%, #fed7aa 100%)',
+                                          color: '#9a3412',
+                                          border: '1px solid #fdba74',
+                                          padding: '2px 8px',
+                                          borderRadius: '999px',
+                                          fontSize: '11px',
+                                          fontWeight: '800',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px',
+                                          boxShadow: '0 1px 3px rgba(249, 115, 22, 0.15)'
+                                        }}
+                                      >
+                                        🥉 Rank 3
+                                      </span>
+                                    )}
+                                  </div>
                                   <div style={{ fontSize: '12px', color: '#64748b' }}>Student ID: #{student.id}</div>
                                 </div>
                               </div>
@@ -1512,6 +1743,7 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
                       <th style={{ padding: '12px 14px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Score</th>
                       <th style={{ padding: '12px 14px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Percentage</th>
                       <th style={{ padding: '12px 14px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Status</th>
+                      <th style={{ padding: '12px 14px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800', textAlign: 'right' }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1535,6 +1767,27 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
                           <span style={badgeStyle(sub.status === 'Pass' ? 'pass' : 'fail')}>
                             {sub.status.toUpperCase()}
                           </span>
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                          <button
+                            onClick={() => setInspectingSubmission(sub)}
+                            style={{
+                              background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)',
+                              color: '#ffffff',
+                              border: 'none',
+                              padding: '6px 12px',
+                              borderRadius: '8px',
+                              fontSize: '11px',
+                              fontWeight: '800',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              boxShadow: '0 2px 6px rgba(79, 70, 229, 0.25)'
+                            }}
+                          >
+                            🔍 Review Answers
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -1684,6 +1937,289 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
           </div>
         </div>
       )}
+
+      {/* MODAL 4: DETAILED QUESTION EVALUATION & ANSWER KEY REVIEW */}
+      {inspectingSubmission && (() => {
+        const snapshots = getSubmissionSnapshots(inspectingSubmission);
+        const correctCount = inspectingSubmission.correctCount ?? snapshots.filter((q) => q.isCorrect).length;
+        const wrongCount = inspectingSubmission.wrongCount ?? snapshots.filter((q) => !q.isCorrect && !q.isSkipped).length;
+        const skippedCount = inspectingSubmission.unanswered ?? snapshots.filter((q) => q.isSkipped).length;
+
+        return (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(15, 23, 42, 0.7)',
+              backdropFilter: 'blur(6px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 130,
+              padding: '20px',
+              boxSizing: 'border-box'
+            }}
+            onClick={() => setInspectingSubmission(null)}
+          >
+            <div
+              style={{
+                background: '#ffffff',
+                borderRadius: '24px',
+                maxWidth: '880px',
+                width: '100%',
+                maxHeight: '90vh',
+                overflowY: 'auto',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+                border: '1.5px solid #e2e8f0',
+                padding: '32px',
+                boxSizing: 'border-box'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1.5px solid #e2e8f0', paddingBottom: '20px', marginBottom: '24px' }}>
+                <div>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#ede9fe', color: '#4338ca', padding: '4px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 800, marginBottom: '8px' }}>
+                    DETAILED SUBMISSION EVALUATION & ANSWER KEY
+                  </div>
+                  <h2 style={{ fontSize: '22px', fontWeight: 800, color: '#0f172a', margin: '0 0 4px 0' }}>
+                    {inspectingSubmission.testName}
+                  </h2>
+                  <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
+                    Candidate: <strong style={{ color: '#0f172a' }}>{inspectingSubmission.studentName}</strong> • Subject: <strong style={{ color: '#4f46e5' }}>{inspectingSubmission.subject}</strong> • Completed: {inspectingSubmission.timeTaken || inspectingSubmission.endTime}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setInspectingSubmission(null)}
+                  style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', fontSize: '16px', cursor: 'pointer', fontWeight: 800, color: '#64748b' }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Score Highlights & 3 Pill Stats */}
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: '18px',
+                  padding: '20px 24px',
+                  marginBottom: '28px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '16px'
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '12px', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
+                    Submission Score
+                  </div>
+                  <div style={{ fontSize: '32px', fontWeight: 800, color: '#0f172a', marginTop: '4px' }}>
+                    {inspectingSubmission.marksObtained}
+                    <span style={{ fontSize: '18px', color: '#64748b', fontWeight: 600 }}> / {inspectingSubmission.totalMarks}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                    <span style={{ fontWeight: 800, color: '#4f46e5', fontSize: '15px' }}>{inspectingSubmission.percentage}%</span>
+                    <span
+                      style={{
+                        background: inspectingSubmission.status === 'Pass' ? '#dcfce7' : '#fee2e2',
+                        color: inspectingSubmission.status === 'Pass' ? '#15803d' : '#991b1b',
+                        border: `1px solid ${inspectingSubmission.status === 'Pass' ? '#bbf7d0' : '#fecaca'}`,
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        fontSize: '11px',
+                        fontWeight: 800
+                      }}
+                    >
+                      {inspectingSubmission.status.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3 Pills */}
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  <div style={{ background: '#ffffff', border: '1.5px solid #bbf7d0', padding: '12px 18px', borderRadius: '14px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 800, color: '#15803d' }}>{correctCount}</div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#166534', marginTop: '2px' }}>✓ Correct</div>
+                  </div>
+                  <div style={{ background: '#ffffff', border: '1.5px solid #fecaca', padding: '12px 18px', borderRadius: '14px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 800, color: '#991b1b' }}>{wrongCount}</div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#991b1b', marginTop: '2px' }}>✗ Wrong</div>
+                  </div>
+                  <div style={{ background: '#ffffff', border: '1.5px solid #fde68a', padding: '12px 18px', borderRadius: '14px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 800, color: '#b45309' }}>{skippedCount}</div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#92400e', marginTop: '2px' }}>— Skipped</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Review Questions List */}
+              <h3 style={{ fontSize: '17px', fontWeight: 800, color: '#0f172a', marginBottom: '16px' }}>
+                Question Breakdown ({snapshots.length})
+              </h3>
+
+              {snapshots.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '30px', color: '#64748b', background: '#f8fafc', borderRadius: '14px' }}>
+                  Question-level breakdown not available for this legacy record.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                  {snapshots.map((q, idx) => (
+                    <div
+                      key={q.id || idx}
+                      style={{
+                        background: '#f8fafc',
+                        border: '1.5px solid #e2e8f0',
+                        borderRadius: '16px',
+                        padding: '20px 22px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontWeight: 800, color: '#4f46e5', fontSize: '12px', textTransform: 'uppercase' }}>
+                            Q{idx + 1}
+                          </span>
+                          {q.isCorrect ? (
+                            <span
+                              style={{
+                                background: '#dcfce7',
+                                color: '#15803d',
+                                border: '1px solid #bbf7d0',
+                                padding: '2px 8px',
+                                borderRadius: '999px',
+                                fontSize: '11px',
+                                fontWeight: 800
+                              }}
+                            >
+                              ✓ Correct (+{q.marksEarned} Marks)
+                            </span>
+                          ) : q.isSkipped ? (
+                            <span
+                              style={{
+                                background: '#f1f5f9',
+                                color: '#64748b',
+                                border: '1px solid #cbd5e1',
+                                padding: '2px 8px',
+                                borderRadius: '999px',
+                                fontSize: '11px',
+                                fontWeight: 800
+                              }}
+                            >
+                              — Skipped (0 Marks)
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                background: '#fee2e2',
+                                color: '#991b1b',
+                                border: '1px solid #fecaca',
+                                padding: '2px 8px',
+                                borderRadius: '999px',
+                                fontSize: '11px',
+                                fontWeight: 800
+                              }}
+                            >
+                              ✗ Incorrect (0 Marks)
+                            </span>
+                          )}
+                        </div>
+                        <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
+                          {q.marks || 1} {(q.marks || 1) === 1 ? 'Mark' : 'Marks'}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '15px', color: '#0f172a', fontWeight: 700, marginBottom: '14px', lineHeight: 1.4 }}>
+                        {q.questionText}
+                      </div>
+
+                      {q.isSkipped && (
+                        <div style={{ background: '#fffbeb', border: '1px solid #fef3c7', color: '#b45309', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 600, marginBottom: '12px' }}>
+                          ⚠️ Student skipped this question.
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {q.options.map((opt, optIdx) => {
+                          const isCorrect = optIdx === q.correctOption;
+                          const isChosen = optIdx === q.selectedOption;
+                          const isWrongChoice = isChosen && !isCorrect;
+
+                          let bg = '#ffffff';
+                          let border = '1px solid #e2e8f0';
+                          let textColor = '#334155';
+                          let badge = null;
+
+                          if (isCorrect) {
+                            bg = '#ecfdf5';
+                            border = '1.5px solid #10b981';
+                            textColor = '#065f46';
+                            badge = (
+                              <span style={{ marginLeft: 'auto', background: '#10b981', color: '#ffffff', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 800 }}>
+                                ✓ {isChosen ? 'Student Choice (Correct)' : 'Correct Answer'}
+                              </span>
+                            );
+                          } else if (isWrongChoice) {
+                            bg = '#fef2f2';
+                            border = '1.5px solid #ef4444';
+                            textColor = '#991b1b';
+                            badge = (
+                              <span style={{ marginLeft: 'auto', background: '#ef4444', color: '#ffffff', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 800 }}>
+                                ✗ Student Choice (Wrong)
+                              </span>
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={optIdx}
+                              style={{
+                                padding: '10px 14px',
+                                borderRadius: '10px',
+                                background: bg,
+                                border,
+                                color: textColor,
+                                fontSize: '13px',
+                                fontWeight: isCorrect || isChosen ? 700 : 500,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '10px'
+                              }}
+                            >
+                              <span style={{ fontWeight: 800, width: '20px' }}>{String.fromCharCode(65 + optIdx)}.</span>
+                              <span>{opt}</span>
+                              {badge}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
+                <button
+                  onClick={() => setInspectingSubmission(null)}
+                  style={{
+                    background: '#f1f5f9',
+                    color: '#334155',
+                    border: 'none',
+                    padding: '10px 24px',
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    fontWeight: 800,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Close Review
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
