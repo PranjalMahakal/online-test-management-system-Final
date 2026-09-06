@@ -1,31 +1,106 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import TakeTest from './TakeTest';
 
 export default function StudentDashboard({ user, tests, results, setResults, onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [testViewMode, setTestViewMode] = useState('available');
   const [ongoingTest, setOngoingTest] = useState(null);
   const [recentResult, setRecentResult] = useState(null);
   const [inspectingResult, setInspectingResult] = useState(null);
 
-  // या student चे जुने सर्व सबमिशन रेकॉर्ड्स
+  // All submissions for this student
   const studentResults = results.filter((r) => r.studentId === user.id);
 
-  // ज्या टेस्ट्स Published आहेत अशा सर्व टेस्ट्स
+  // All published tests
   const publishedTests = tests.filter((t) => t.status === 'published');
 
-  // 🔒 आधी सोडवलेल्या Test IDs शोधणे
-  const completedTestIds = studentResults.map((r) => r.testId || r.testName);
+  // Auto-assign missed records for expired published tests not attempted before deadline
+  useEffect(() => {
+    const now = new Date();
+    const expiredPublishedTests = tests.filter((t) => {
+      if (t.status !== 'published') return false;
+      return t.expiryDateTime && now > new Date(t.expiryDateTime);
+    });
 
-  // 🔒 Available Tests = फक्त अशा टेस्ट्स ज्या या student ने अद्याप सोडवलेल्या नाहीत
+    if (expiredPublishedTests.length === 0) return;
+
+    // Identify expired tests without any record for this student
+    const unrecordedExpiredTests = expiredPublishedTests.filter((t) => {
+      return !results.some(
+        (r) => r.studentId === user.id && (r.testId === t.id || r.testName === t.title)
+      );
+    });
+
+    if (unrecordedExpiredTests.length > 0) {
+      const newMissedRecords = unrecordedExpiredTests.map((t) => {
+        const totalMarks = (t.questions || []).reduce((sum, q) => sum + (q.marks || 1), 0);
+        return {
+          id: Date.now() + Math.floor(Math.random() * 100000),
+          testId: t.id,
+          studentId: user.id,
+          studentName: user.name,
+          testName: t.title,
+          subject: t.subject,
+          startTime: 'N/A',
+          endTime: 'N/A',
+          timeTaken: '0m 00s',
+          totalQuestions: t.questions ? t.questions.length : 0,
+          attempted: 0,
+          unanswered: t.questions ? t.questions.length : 0,
+          correctCount: 0,
+          wrongCount: 0,
+          totalMarks,
+          marksObtained: 0,
+          percentage: 0,
+          status: 'Fail',
+          note: 'Missed / Expired (Not attempted before deadline)',
+          userAnswers: {},
+          questionSnapshots: (t.questions || []).map((q, i) => ({
+            id: q.id || i + 1,
+            questionText: q.questionText,
+            options: q.options || [],
+            correctOption: q.correctOption,
+            selectedOption: null,
+            isCorrect: false,
+            isSkipped: true,
+            marksEarned: 0,
+            marks: q.marks || 1
+          }))
+        };
+      });
+
+      setResults((prev) => [...newMissedRecords, ...prev]);
+    }
+  }, [tests, results, user.id, user.name, setResults]);
+
+  // Tests that this student has actively attempted/submitted (normal attempt)
+  const activelyCompletedTestIds = studentResults
+    .filter((r) => !r.note)
+    .map((r) => r.testId || r.testName);
+
+  // Available / Pending Tests for this student (excludes tests the student has already taken normally)
   const availableTests = publishedTests.filter(
-    (t) => !completedTestIds.includes(t.id) && !completedTestIds.includes(t.title)
+    (t) => !activelyCompletedTestIds.includes(t.id) && !activelyCompletedTestIds.includes(t.title)
   );
 
-  const totalAvailable = availableTests.length;
+  // Currently active tests (deadline has not passed)
+  const activeTests = availableTests.filter(
+    (t) => !t.expiryDateTime || new Date() <= new Date(t.expiryDateTime)
+  );
+
+  const totalAvailable = activeTests.length;
   const totalCompleted = studentResults.length;
   const avgScore = totalCompleted > 0
-    ? (studentResults.reduce((acc, curr) => acc + parseFloat(curr.percentage), 0) / totalCompleted).toFixed(1)
+    ? (studentResults.reduce((acc, curr) => acc + parseFloat(curr.percentage || 0), 0) / totalCompleted).toFixed(1)
     : '0.0';
+
+  const handleStartTest = (test) => {
+    if (test.expiryDateTime && new Date() > new Date(test.expiryDateTime)) {
+      alert('This test deadline has passed and is expired! You cannot start it.');
+      return;
+    }
+    setOngoingTest(test);
+  };
 
   // Immediate save on submission
   const handleSaveResult = (result) => {
@@ -123,7 +198,7 @@ export default function StudentDashboard({ user, tests, results, setResults, onL
               className={`side-btn ${activeTab === 'startTest' ? 'active' : ''}`}
               onClick={() => setActiveTab('startTest')}
             >
-              ▶️ Start Test {availableTests.length > 0 && <span className="badge badge-published" style={{ marginLeft: 'auto', padding: '2px 8px', fontSize: '11px' }}>{availableTests.length}</span>}
+              ▶️ Start Test {activeTests.length > 0 && <span className="badge badge-published" style={{ marginLeft: 'auto', padding: '2px 8px', fontSize: '11px' }}>{activeTests.length}</span>}
             </button>
             <button
               className={`side-btn ${activeTab === 'results' ? 'active' : ''}`}
@@ -228,23 +303,89 @@ export default function StudentDashboard({ user, tests, results, setResults, onL
                 <div className="test-grid">
                   {availableTests.map((t) => {
                     const totalMarks = t.questions.reduce((sum, q) => sum + (q.marks || 1), 0);
+                    const isExpired = t.expiryDateTime && new Date() > new Date(t.expiryDateTime);
                     return (
                       <div key={t.id} className="test-card-box">
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                             <span className="test-title-text">{t.title}</span>
-                            <span className="badge badge-published">Active</span>
+                            {isExpired ? (
+                              <span
+                                className="badge"
+                                style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca' }}
+                              >
+                                Expired / Closed
+                              </span>
+                            ) : (
+                              <span className="badge badge-published">Active</span>
+                            )}
                             <span className="badge badge-subject">{t.subject}</span>
                           </div>
+                          {/* Test Description / Instructions with Fallback */}
+                          <p
+                            style={{
+                              margin: '10px 0 12px 0',
+                              fontSize: '13px',
+                              color: '#475569',
+                              lineHeight: '1.5',
+                              background: '#f8fafc',
+                              padding: '8px 12px',
+                              borderRadius: '10px',
+                              border: '1px solid #e2e8f0',
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '6px'
+                            }}
+                          >
+                            <span style={{ fontSize: '14px', lineHeight: 1 }}>📌</span>
+                            <span>
+                              <strong style={{ color: '#334155' }}>Instructions: </strong>
+                              {t.description?.trim() || 'Comprehensive subject knowledge assessment.'}
+                            </span>
+                          </p>
                           <div className="test-meta-pills">
                             <span className="meta-chip">📋 {t.questions.length} Questions</span>
                             <span className="meta-chip">🎯 {totalMarks} Total Marks</span>
                             <span className="meta-chip">⏱️ {t.duration} Minutes</span>
+                            {t.expiryDateTime && (
+                              <span
+                                className="meta-chip"
+                                style={{
+                                  background: isExpired ? '#fef2f2' : '#f1f5f9',
+                                  color: isExpired ? '#dc2626' : '#475569',
+                                  border: isExpired ? '1px solid #fecaca' : 'none'
+                                }}
+                              >
+                                📅 Deadline: {new Date(t.expiryDateTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                              </span>
+                            )}
                           </div>
                         </div>
-                        <button className="btn btn-primary" onClick={() => setOngoingTest(t)}>
-                          Start Test ▶
-                        </button>
+
+                        {isExpired ? (
+                          <span
+                            style={{
+                              background: '#e2e8f0',
+                              color: '#64748b',
+                              padding: '10px 18px',
+                              borderRadius: '12px',
+                              fontSize: '13px',
+                              fontWeight: 800,
+                              cursor: 'not-allowed',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              border: '1.5px solid #cbd5e1'
+                            }}
+                            title="Deadline Passed"
+                          >
+                            Deadline Passed
+                          </span>
+                        ) : (
+                          <button className="btn btn-primary" onClick={() => handleStartTest(t)}>
+                            Start Test ▶
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -254,42 +395,187 @@ export default function StudentDashboard({ user, tests, results, setResults, onL
           )}
 
           {/* TAB 2: ▶️ START TEST */}
-          {activeTab === 'startTest' && (
-            <div>
-              <h2 className="section-title">Available Assessments</h2>
-              {availableTests.length === 0 ? (
-                <div className="card" style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
-                  <div style={{ fontSize: '30px', marginBottom: '8px' }}>✅</div>
-                  <strong style={{ fontSize: '16px', color: '#0f172a' }}>No Pending Tests</strong>
-                  <p style={{ marginTop: '4px', fontSize: '14px' }}>You have already submitted all available tests.</p>
+          {activeTab === 'startTest' && (() => {
+            const displayTests = testViewMode === 'available' ? availableTests : publishedTests;
+
+            return (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+                  <h2 className="section-title" style={{ margin: 0 }}>
+                    {testViewMode === 'available' ? 'Available Tests' : 'All Published Tests'}
+                  </h2>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => setTestViewMode('available')}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '10px',
+                        fontSize: '13px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        border: '1.5px solid',
+                        borderColor: testViewMode === 'available' ? '#4f46e5' : '#cbd5e1',
+                        background: testViewMode === 'available' ? '#ede9fe' : '#ffffff',
+                        color: testViewMode === 'available' ? '#4338ca' : '#64748b',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      Available Tests ({availableTests.length})
+                    </button>
+                    <button
+                      onClick={() => setTestViewMode('all')}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '10px',
+                        fontSize: '13px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        border: '1.5px solid',
+                        borderColor: testViewMode === 'all' ? '#4f46e5' : '#cbd5e1',
+                        background: testViewMode === 'all' ? '#ede9fe' : '#ffffff',
+                        color: testViewMode === 'all' ? '#4338ca' : '#64748b',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      All Published Tests ({publishedTests.length})
+                    </button>
+                  </div>
                 </div>
-              ) : (
-                <div className="test-grid">
-                  {availableTests.map((t) => {
-                    const totalMarks = t.questions.reduce((sum, q) => sum + (q.marks || 1), 0);
-                    return (
-                      <div key={t.id} className="test-card-box">
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <span className="test-title-text">{t.title}</span>
-                            <span className="badge badge-subject">{t.subject}</span>
+
+                {displayTests.length === 0 ? (
+                  <div className="card" style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                    <div style={{ fontSize: '30px', marginBottom: '8px' }}>✅</div>
+                    <strong style={{ fontSize: '16px', color: '#0f172a' }}>
+                      {testViewMode === 'available' ? 'No Pending Tests' : 'No Published Tests Available'}
+                    </strong>
+                    <p style={{ marginTop: '4px', fontSize: '14px' }}>
+                      {testViewMode === 'available'
+                        ? 'You have already submitted all available tests.'
+                        : 'No tests have been published by teachers yet.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="test-grid">
+                    {displayTests.map((t) => {
+                      const totalMarks = t.questions.reduce((sum, q) => sum + (q.marks || 1), 0);
+                      const isExpired = t.expiryDateTime && new Date() > new Date(t.expiryDateTime);
+                      const isCompleted = activelyCompletedTestIds.includes(t.id) || activelyCompletedTestIds.includes(t.title);
+
+                      return (
+                        <div key={t.id} className="test-card-box">
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                              <span className="test-title-text">{t.title}</span>
+                              {isCompleted ? (
+                                <span
+                                  className="badge"
+                                  style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0' }}
+                                >
+                                  Completed
+                                </span>
+                              ) : isExpired ? (
+                                <span
+                                  className="badge"
+                                  style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca' }}
+                                >
+                                  Expired / Closed
+                                </span>
+                              ) : (
+                                <span className="badge badge-published">Active</span>
+                              )}
+                              <span className="badge badge-subject">{t.subject}</span>
+                            </div>
+
+                            {/* Test Description / Instructions with Fallback */}
+                            <p
+                              style={{
+                                margin: '10px 0 12px 0',
+                                fontSize: '13px',
+                                color: '#475569',
+                                lineHeight: '1.5',
+                                background: '#f8fafc',
+                                padding: '8px 12px',
+                                borderRadius: '10px',
+                                border: '1px solid #e2e8f0',
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: '6px'
+                              }}
+                            >
+                              <span style={{ fontSize: '14px', lineHeight: 1 }}>📌</span>
+                              <span>
+                                <strong style={{ color: '#334155' }}>Instructions: </strong>
+                                {t.description?.trim() || 'Comprehensive subject knowledge assessment.'}
+                              </span>
+                            </p>
+
+                            <div className="test-meta-pills">
+                              <span className="meta-chip">📋 {t.questions.length} Questions</span>
+                              <span className="meta-chip">🎯 {totalMarks} Marks</span>
+                              <span className="meta-chip">⏱️ {t.duration} Mins</span>
+                              {t.expiryDateTime && (
+                                <span
+                                  className="meta-chip"
+                                  style={{
+                                    background: isExpired ? '#fef2f2' : '#f1f5f9',
+                                    color: isExpired ? '#dc2626' : '#475569',
+                                    border: isExpired ? '1px solid #fecaca' : 'none'
+                                  }}
+                                >
+                                  📅 Deadline: {new Date(t.expiryDateTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div className="test-meta-pills">
-                            <span className="meta-chip">📋 {t.questions.length} Questions</span>
-                            <span className="meta-chip">🎯 {totalMarks} Marks</span>
-                            <span className="meta-chip">⏱️ {t.duration} Mins</span>
-                          </div>
+
+                          {isCompleted ? (
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => setActiveTab('results')}
+                              style={{
+                                padding: '9px 18px',
+                                fontSize: '13px',
+                                fontWeight: 800,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px'
+                              }}
+                            >
+                              View Score 📊
+                            </button>
+                          ) : isExpired ? (
+                            <span
+                              style={{
+                                background: '#e2e8f0',
+                                color: '#64748b',
+                                padding: '10px 18px',
+                                borderRadius: '12px',
+                                fontSize: '13px',
+                                fontWeight: 800,
+                                cursor: 'not-allowed',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                border: '1.5px solid #cbd5e1'
+                              }}
+                              title="Deadline Passed"
+                            >
+                              Deadline Passed
+                            </span>
+                          ) : (
+                            <button className="btn btn-primary" onClick={() => handleStartTest(t)}>
+                              Start Test ▶
+                            </button>
+                          )}
                         </div>
-                        <button className="btn btn-primary" onClick={() => setOngoingTest(t)}>
-                          Start Test ▶
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* TAB 3: 📊 RESULTS */}
           {activeTab === 'results' && (
@@ -321,11 +607,25 @@ export default function StudentDashboard({ user, tests, results, setResults, onL
                             <span className="badge badge-subject" style={{ marginTop: '6px', fontSize: '11px', padding: '3px 10px' }}>{r.subject}</span>
                           </td>
                           <td>
-                            <span style={{ fontWeight: 600, color: '#475569' }}>{r.startTime}</span> - <span style={{ fontWeight: 600, color: '#475569' }}>{r.endTime}</span>
+                            {r.startTime && r.startTime !== 'N/A' ? (
+                              <>
+                                <span style={{ fontWeight: 600, color: '#475569' }}>{r.startTime}</span> - <span style={{ fontWeight: 600, color: '#475569' }}>{r.endTime}</span>
+                              </>
+                            ) : (
+                              <span style={{ color: '#ef4444', fontWeight: 700, fontSize: '12px' }}>
+                                ⚠️ {r.note || 'Expired / Missed'}
+                              </span>
+                            )}
                           </td>
                           <td>
-                            <strong>{r.attempted}</strong> attempted / <span style={{ color: '#ef4444' }}>{r.unanswered} skipped</span>
-                            <br /><small style={{ color: '#64748b' }}>Total: {r.totalQuestions} Questions</small>
+                            {r.note ? (
+                              <span style={{ color: '#ef4444', fontSize: '12px', fontWeight: 600 }}>{r.note}</span>
+                            ) : (
+                              <>
+                                <strong>{r.attempted}</strong> attempted / <span style={{ color: '#ef4444' }}>{r.unanswered} skipped</span>
+                                <br /><small style={{ color: '#64748b' }}>Total: {r.totalQuestions} Questions</small>
+                              </>
+                            )}
                           </td>
                           <td>
                             <span style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a' }}>{r.marksObtained}</span> / {r.totalMarks}
@@ -424,6 +724,27 @@ export default function StudentDashboard({ user, tests, results, setResults, onL
                 ✕
               </button>
             </div>
+
+            {/* Missed / Expired Alert Banner */}
+            {inspectingResult.note && (
+              <div
+                style={{
+                  background: '#fef2f2',
+                  border: '1.5px solid #fecaca',
+                  color: '#991b1b',
+                  padding: '12px 18px',
+                  borderRadius: '14px',
+                  marginBottom: '22px',
+                  fontWeight: 700,
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                ⚠️ {inspectingResult.note}
+              </div>
+            )}
 
             {/* Score Highlights & 3 Pill Stats */}
             <div

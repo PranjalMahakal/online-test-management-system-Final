@@ -587,33 +587,57 @@ export default function TakeTest({ test, user, onFinishTest, onSaveResult }) {
       <div
         className="card"
         style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
           background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
           color: '#ffffff',
           border: 'none',
-          boxShadow: '0 10px 25px rgba(79, 70, 229, 0.25)'
+          boxShadow: '0 10px 25px rgba(79, 70, 229, 0.25)',
+          marginBottom: '24px'
         }}
       >
-        <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>{test.title}</h2>
-          <span style={{ opacity: 0.9, fontSize: '14px', fontWeight: 600 }}>Subject: {test.subject}</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+          <div>
+            <h2 style={{ fontSize: '22px', fontWeight: 800, margin: '0 0 6px 0' }}>{test.title}</h2>
+            <span style={{ opacity: 0.9, fontSize: '14px', fontWeight: 600 }}>Subject: {test.subject}</span>
+          </div>
+          <div
+            style={{
+              background: 'rgba(255, 255, 255, 0.2)',
+              backdropFilter: 'blur(8px)',
+              padding: '10px 20px',
+              borderRadius: '14px',
+              fontSize: '18px',
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}
+          >
+            ⏳ {minutes}:{seconds < 10 ? `0${seconds}` : seconds}
+          </div>
         </div>
+
+        {/* Pre-Test Instructions */}
         <div
           style={{
-            background: 'rgba(255, 255, 255, 0.2)',
-            backdropFilter: 'blur(8px)',
-            padding: '10px 20px',
-            borderRadius: '14px',
-            fontSize: '18px',
-            fontWeight: 800,
+            marginTop: '16px',
+            paddingTop: '14px',
+            borderTop: '1px solid rgba(255, 255, 255, 0.2)',
+            fontSize: '13px',
+            lineHeight: '1.5',
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             gap: '8px'
           }}
         >
-          ⏳ {minutes}:{seconds < 10 ? `0${seconds}` : seconds}
+          <span style={{ fontSize: '16px' }}>📌</span>
+          <div>
+            <strong style={{ textTransform: 'uppercase', letterSpacing: '0.6px', fontSize: '11px', display: 'block', opacity: 0.9, marginBottom: '2px' }}>
+              Instructions:
+            </strong>
+            <span style={{ opacity: 0.95, whiteSpace: 'pre-line' }}>
+              {test.description?.trim() || 'Comprehensive subject knowledge assessment.'}
+            </span>
+          </div>
         </div>
       </div>
 

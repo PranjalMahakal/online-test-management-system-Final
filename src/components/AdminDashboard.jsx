@@ -17,6 +17,8 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
 
   // Sorting for Student Performance Tab
   const [studentSortBy, setStudentSortBy] = useState('highest');
+  // Search Query for Student Performance Section
+  const [studentSearchQuery, setStudentSearchQuery] = useState('');
 
   // Extract lists
   const teacherList = useMemo(() => users.filter((u) => u.role === 'teacher'), [users]);
@@ -66,19 +68,21 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
     });
 
     // 2. Sort students based on selected sorting option
+    const sorted = [...list];
     switch (studentSortBy) {
       case 'lowest':
         // Lowest Performance -> Sorts low to high (Ascending)
-        return list.sort((a, b) => {
+        sorted.sort((a, b) => {
           if (a.percentageNum !== b.percentageNum) {
             return a.percentageNum - b.percentageNum;
           }
           return a.student.name.localeCompare(b.student.name);
         });
+        break;
 
       case 'tests':
         // Most Tests Attempted -> Sorts by total tests attempted (Descending)
-        return list.sort((a, b) => {
+        sorted.sort((a, b) => {
           if (b.testsAttempted !== a.testsAttempted) {
             return b.testsAttempted - a.testsAttempted;
           }
@@ -87,15 +91,17 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
           }
           return a.student.name.localeCompare(b.student.name);
         });
+        break;
 
       case 'name':
         // Alphabetical (A-Z) -> Sorts by student name
-        return list.sort((a, b) => a.student.name.localeCompare(b.student.name));
+        sorted.sort((a, b) => a.student.name.localeCompare(b.student.name));
+        break;
 
       case 'highest':
       default:
         // Highest Performance (Default) -> Sorts high to low (Descending)
-        return list.sort((a, b) => {
+        sorted.sort((a, b) => {
           if (b.percentageNum !== a.percentageNum) {
             return b.percentageNum - a.percentageNum;
           }
@@ -104,8 +110,25 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
           }
           return a.student.name.localeCompare(b.student.name);
         });
+        break;
     }
+
+    return sorted.map((item, idx) => ({
+      ...item,
+      rank: idx + 1
+    }));
   }, [studentList, results, studentSortBy]);
+
+  // Filtered Students for the Student Directory based on Search Query (name or email, case-insensitive)
+  const filteredStudents = useMemo(() => {
+    if (!studentSearchQuery.trim()) return sortedStudents;
+    const q = studentSearchQuery.trim().toLowerCase();
+    return sortedStudents.filter(({ student }) => {
+      const nameMatch = student.name && student.name.toLowerCase().includes(q);
+      const emailMatch = student.email && student.email.toLowerCase().includes(q);
+      return nameMatch || emailMatch;
+    });
+  }, [sortedStudents, studentSearchQuery]);
 
   // Total calculations
   const totalTeachers = teacherList.length;
@@ -987,7 +1010,7 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
           {/* TAB 3: 🎓 STUDENT MONITORING & PERFORMANCE */}
           {activeTab === 'students' && (
             <div>
-              <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                   <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0' }}>
                     Student Directory & Performance Analytics
@@ -996,9 +1019,109 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
                     Monitor student test attempts, pass/fail ratios, average percentages, and examine comprehensive individual scorecards.
                   </p>
                 </div>
-                <div style={{ background: '#dcfce7', color: '#15803d', padding: '8px 16px', borderRadius: '12px', fontWeight: '800', fontSize: '14px' }}>
+                <div style={{ background: '#dcfce7', color: '#15803d', padding: '8px 16px', borderRadius: '12px', fontWeight: '800', fontSize: '14px', border: '1px solid #bbf7d0' }}>
                   Total Students: {totalStudents}
                 </div>
+              </div>
+
+              {/* Search Bar Toolbar (Mirrors Teacher Panel Pattern) */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                  marginBottom: '20px',
+                  flexWrap: 'wrap'
+                }}
+              >
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setStudentSearchQuery(studentSearchQuery.trim());
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, maxWidth: '560px' }}
+                >
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <input
+                      type="text"
+                      placeholder="Search student by name or email (e.g. Radha Patil, radha@test.com)..."
+                      value={studentSearchQuery}
+                      onChange={(e) => setStudentSearchQuery(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '11px 16px 11px 40px',
+                        border: '1.5px solid #cbd5e1',
+                        borderRadius: '12px',
+                        fontSize: '14px',
+                        color: '#0f172a',
+                        background: '#ffffff',
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                        transition: 'border-color 0.2s'
+                      }}
+                      onFocus={(e) => (e.target.style.borderColor = '#4f46e5')}
+                      onBlur={(e) => (e.target.style.borderColor = '#cbd5e1')}
+                    />
+                    <span
+                      style={{
+                        position: 'absolute',
+                        left: '14px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        fontSize: '16px',
+                        color: '#94a3b8',
+                        pointerEvents: 'none'
+                      }}
+                    >
+                      🔍
+                    </span>
+                  </div>
+
+                  <button
+                    type="submit"
+                    style={{
+                      background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)',
+                      color: '#ffffff',
+                      border: 'none',
+                      padding: '11px 22px',
+                      borderRadius: '12px',
+                      fontSize: '14px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    Search
+                  </button>
+
+                  {studentSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setStudentSearchQuery('')}
+                      style={{
+                        background: '#f1f5f9',
+                        color: '#475569',
+                        border: '1.5px solid #e2e8f0',
+                        padding: '11px 16px',
+                        borderRadius: '12px',
+                        fontSize: '14px',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      ✕ Reset
+                    </button>
+                  )}
+                </form>
+
+                {studentList.length > 0 && (
+                  <div style={{ fontSize: '13px', fontWeight: '700', color: '#64748b' }}>
+                    Showing {filteredStudents.length} of {studentList.length} students
+                  </div>
+                )}
               </div>
 
               {/* Students Table Card */}
@@ -1067,159 +1190,191 @@ export default function AdminDashboard({ user, users = [], tests = [], results =
                   </div>
                 </div>
 
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', textAlign: 'left' }}>
-                        <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Student Name</th>
-                        <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Email Address</th>
-                        <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Tests Attempted</th>
-                        <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Passed</th>
-                        <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Failed</th>
-                        <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Average Score %</th>
-                        <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800', textAlign: 'right' }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedStudents.map(({ student, submissions: studentSubmissions, passedCount, failedCount, avgPct }, index) => {
-                        return (
-                          <tr key={student.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                            <td style={{ padding: '16px 18px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <div
+                {studentList.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
+                    No students registered in the system yet.
+                  </div>
+                ) : filteredStudents.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 24px', color: '#64748b' }}>
+                    <div style={{ fontSize: '36px', marginBottom: '12px' }}>🔍</div>
+                    <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#0f172a', margin: '0 0 6px 0' }}>
+                      No student records found matching your search.
+                    </h3>
+                    <p style={{ fontSize: '14px', margin: '0 0 16px 0', color: '#64748b' }}>
+                      No student records match "{studentSearchQuery}". Try clearing your search query or searching by name or email.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setStudentSearchQuery('')}
+                      style={{
+                        background: '#f1f5f9',
+                        color: '#475569',
+                        border: '1.5px solid #cbd5e1',
+                        padding: '8px 18px',
+                        borderRadius: '10px',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Clear Search
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', textAlign: 'left' }}>
+                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Student Name</th>
+                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Email Address</th>
+                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Tests Attempted</th>
+                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Passed</th>
+                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Failed</th>
+                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Average Score %</th>
+                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800', textAlign: 'right' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredStudents.map(({ student, submissions: studentSubmissions, passedCount, failedCount, avgPct, rank }) => {
+                          return (
+                            <tr key={student.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '16px 18px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                  <div
+                                    style={{
+                                      width: '38px',
+                                      height: '38px',
+                                      borderRadius: '12px',
+                                      background: '#dcfce7',
+                                      color: '#15803d',
+                                      fontWeight: '800',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontSize: '14px'
+                                    }}
+                                  >
+                                    {student.name.split(' ').map((n) => n[0]).join('')}
+                                  </div>
+                                  <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                      <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '14px' }}>{student.name}</span>
+                                      {studentSortBy === 'highest' && rank === 1 && (
+                                        <span
+                                          style={{
+                                            background: 'linear-gradient(135deg, #fef08a 0%, #fde047 100%)',
+                                            color: '#854d0e',
+                                            border: '1px solid #facc15',
+                                            padding: '2px 8px',
+                                            borderRadius: '999px',
+                                            fontSize: '11px',
+                                            fontWeight: '800',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '4px',
+                                            boxShadow: '0 1px 3px rgba(234, 179, 8, 0.2)'
+                                          }}
+                                        >
+                                          🥇 Rank 1
+                                        </span>
+                                      )}
+                                      {studentSortBy === 'highest' && rank === 2 && (
+                                        <span
+                                          style={{
+                                            background: 'linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%)',
+                                            color: '#334155',
+                                            border: '1px solid #cbd5e1',
+                                            padding: '2px 8px',
+                                            borderRadius: '999px',
+                                            fontSize: '11px',
+                                            fontWeight: '800',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '4px',
+                                            boxShadow: '0 1px 3px rgba(100, 116, 139, 0.15)'
+                                          }}
+                                        >
+                                          🥈 Rank 2
+                                        </span>
+                                      )}
+                                      {studentSortBy === 'highest' && rank === 3 && (
+                                        <span
+                                          style={{
+                                            background: 'linear-gradient(135deg, #ffedd5 0%, #fed7aa 100%)',
+                                            color: '#9a3412',
+                                            border: '1px solid #fdba74',
+                                            padding: '2px 8px',
+                                            borderRadius: '999px',
+                                            fontSize: '11px',
+                                            fontWeight: '800',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '4px',
+                                            boxShadow: '0 1px 3px rgba(249, 115, 22, 0.15)'
+                                          }}
+                                        >
+                                          🥉 Rank 3
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#64748b' }}>Student ID: #{student.id}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td style={{ padding: '16px 18px', color: '#475569', fontSize: '14px', fontWeight: '600' }}>
+                                {student.email}
+                              </td>
+                              <td style={{ padding: '16px 18px' }}>
+                                <span style={{ fontWeight: '800', fontSize: '15px', color: '#0f172a' }}>{studentSubmissions.length}</span>
+                              </td>
+                              <td style={{ padding: '16px 18px' }}>
+                                <span style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '800' }}>
+                                  {passedCount} Pass
+                                </span>
+                              </td>
+                              <td style={{ padding: '16px 18px' }}>
+                                <span style={{ background: failedCount > 0 ? '#fee2e2' : '#f1f5f9', color: failedCount > 0 ? '#991b1b' : '#64748b', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '800' }}>
+                                  {failedCount} Fail
+                                </span>
+                              </td>
+                              <td style={{ padding: '16px 18px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span style={{ fontWeight: '800', fontSize: '15px', color: '#4f46e5' }}>{avgPct}%</span>
+                                  {studentSubmissions.length > 0 && (
+                                    <div style={{ width: '60px', height: '6px', background: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
+                                      <div style={{ width: `${Math.min(100, Math.max(0, parseFloat(avgPct)))}%`, height: '100%', background: parseFloat(avgPct) >= 40 ? '#10b981' : '#ef4444' }} />
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td style={{ padding: '16px 18px', textAlign: 'right' }}>
+                                <button
+                                  onClick={() => setSelectedStudent({ student, submissions: studentSubmissions, avgPct, passedCount, failedCount })}
                                   style={{
-                                    width: '38px',
-                                    height: '38px',
-                                    borderRadius: '12px',
-                                    background: '#dcfce7',
-                                    color: '#15803d',
+                                    background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    padding: '8px 16px',
+                                    borderRadius: '10px',
+                                    fontSize: '13px',
                                     fontWeight: '800',
-                                    display: 'flex',
+                                    cursor: 'pointer',
+                                    boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)',
+                                    display: 'inline-flex',
                                     alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: '14px'
+                                    gap: '6px'
                                   }}
                                 >
-                                  {student.name.split(' ').map((n) => n[0]).join('')}
-                                </div>
-                                <div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                                    <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '14px' }}>{student.name}</span>
-                                    {studentSortBy === 'highest' && index === 0 && (
-                                      <span
-                                        style={{
-                                          background: 'linear-gradient(135deg, #fef08a 0%, #fde047 100%)',
-                                          color: '#854d0e',
-                                          border: '1px solid #facc15',
-                                          padding: '2px 8px',
-                                          borderRadius: '999px',
-                                          fontSize: '11px',
-                                          fontWeight: '800',
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          gap: '4px',
-                                          boxShadow: '0 1px 3px rgba(234, 179, 8, 0.2)'
-                                        }}
-                                      >
-                                        🥇 Rank 1
-                                      </span>
-                                    )}
-                                    {studentSortBy === 'highest' && index === 1 && (
-                                      <span
-                                        style={{
-                                          background: 'linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%)',
-                                          color: '#334155',
-                                          border: '1px solid #cbd5e1',
-                                          padding: '2px 8px',
-                                          borderRadius: '999px',
-                                          fontSize: '11px',
-                                          fontWeight: '800',
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          gap: '4px',
-                                          boxShadow: '0 1px 3px rgba(100, 116, 139, 0.15)'
-                                        }}
-                                      >
-                                        🥈 Rank 2
-                                      </span>
-                                    )}
-                                    {studentSortBy === 'highest' && index === 2 && (
-                                      <span
-                                        style={{
-                                          background: 'linear-gradient(135deg, #ffedd5 0%, #fed7aa 100%)',
-                                          color: '#9a3412',
-                                          border: '1px solid #fdba74',
-                                          padding: '2px 8px',
-                                          borderRadius: '999px',
-                                          fontSize: '11px',
-                                          fontWeight: '800',
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          gap: '4px',
-                                          boxShadow: '0 1px 3px rgba(249, 115, 22, 0.15)'
-                                        }}
-                                      >
-                                        🥉 Rank 3
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div style={{ fontSize: '12px', color: '#64748b' }}>Student ID: #{student.id}</div>
-                                </div>
-                              </div>
-                            </td>
-                            <td style={{ padding: '16px 18px', color: '#475569', fontSize: '14px', fontWeight: '600' }}>
-                              {student.email}
-                            </td>
-                            <td style={{ padding: '16px 18px' }}>
-                              <span style={{ fontWeight: '800', fontSize: '15px', color: '#0f172a' }}>{studentSubmissions.length}</span>
-                            </td>
-                            <td style={{ padding: '16px 18px' }}>
-                              <span style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '800' }}>
-                                {passedCount} Pass
-                              </span>
-                            </td>
-                            <td style={{ padding: '16px 18px' }}>
-                              <span style={{ background: failedCount > 0 ? '#fee2e2' : '#f1f5f9', color: failedCount > 0 ? '#991b1b' : '#64748b', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '800' }}>
-                                {failedCount} Fail
-                              </span>
-                            </td>
-                            <td style={{ padding: '16px 18px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{ fontWeight: '800', fontSize: '15px', color: '#4f46e5' }}>{avgPct}%</span>
-                                {studentSubmissions.length > 0 && (
-                                  <div style={{ width: '60px', height: '6px', background: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
-                                    <div style={{ width: `${Math.min(100, Math.max(0, parseFloat(avgPct)))}%`, height: '100%', background: parseFloat(avgPct) >= 40 ? '#10b981' : '#ef4444' }} />
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                            <td style={{ padding: '16px 18px', textAlign: 'right' }}>
-                              <button
-                                onClick={() => setSelectedStudent({ student, submissions: studentSubmissions, avgPct, passedCount, failedCount })}
-                                style={{
-                                  background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)',
-                                  color: '#ffffff',
-                                  border: 'none',
-                                  padding: '8px 16px',
-                                  borderRadius: '10px',
-                                  fontSize: '13px',
-                                  fontWeight: '800',
-                                  cursor: 'pointer',
-                                  boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '6px'
-                                }}
-                              >
-                                📄 Inspect Scorecard
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                                  📄 Inspect Scorecard
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
