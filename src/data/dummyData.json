@@ -7,9 +7,9 @@
       "password": "admin",
       "role": "admin"
     },
-    { "id": 1, "name": "Pranali Jadhav", "email": "pranali@test.com", "password": "123456", "role": "teacher" },
-    { "id": 2, "name": "Vishal More", "email": "vishal@test.com", "password": "123456", "role": "teacher" },
-    { "id": 3, "name": "Shital Ghule", "email": "shital@test.com", "password": "123456", "role": "teacher" },
+    { "id": 1, "name": "Pranali Jadhav", "email": "pranali@test.com", "password": "123456", "role": "teacher", "subject": "Web Development" },
+    { "id": 2, "name": "Vishal More", "email": "vishal@test.com", "password": "123456", "role": "teacher", "subject": "Java Programming" },
+    { "id": 3, "name": "Shital Ghule", "email": "shital@test.com", "password": "123456", "role": "teacher", "subject": "Cloud Computing" },
     { "id": 4, "name": "Radha Patil", "email": "radha@test.com", "password": "123456", "role": "student" },
     { "id": 5, "name": "Rahul shinde", "email": "rahul@test.com", "password": "123456", "role": "student" },
     { "id": 6, "name": "Priya Thorat", "email": "priya@test.com", "password": "123456", "role": "student" },
@@ -24,6 +24,7 @@
       "title": "JavaScript Basics",
       "subject": "Web Development",
       "duration": 5,
+      "expiryDateTime": "2026-12-31T23:59:00.000Z",
       "status": "published",
       "questions": [
         {

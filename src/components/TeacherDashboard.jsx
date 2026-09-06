@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 export default function TeacherDashboard({ user, tests, setTests, results, onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -7,12 +7,59 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
   // Active Draft Test ID (if editing an existing draft)
   const [editingTestId, setEditingTestId] = useState(null);
 
+  // Predefined Subject assigned to this Teacher
+  const teacherAssignedSubject = user?.subject || (
+    user?.email === 'pranali@test.com' ? 'Web Development' :
+    user?.email === 'vishal@test.com' ? 'Java Programming' :
+    user?.email === 'shital@test.com' ? 'Cloud Computing' : 'Web Development'
+  );
+
+  // Helper to format ISO/date string for <input type="datetime-local" />
+  const formatDateTimeForInput = (dateTime) => {
+    if (!dateTime) return '';
+    const d = new Date(dateTime);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  // Helper to dynamically calculate current local date & time formatted as YYYY-MM-DDTHH:mm
+  const getCurrentLocalDateTimeString = () => {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  };
+
+  // Dynamic min datetime for datetime-local picker UI restriction
+  const [currentMinDateTime, setCurrentMinDateTime] = useState(getCurrentLocalDateTimeString);
+
+  // Expiry input ref for programmatic focus
+  const expiryInputRef = useRef(null);
+
+  // Expiry error message state
+  const [expiryError, setExpiryError] = useState('');
+
+  // Real-time timestamp state (kept up-to-date for pure render evaluations)
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+
+  // Keep min datetime and current timestamp updated periodically
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(Date.now());
+      setCurrentMinDateTime(getCurrentLocalDateTimeString());
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Test Details
   const [title, setTitle] = useState('');
-  const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [duration, setDuration] = useState(15);
+  const [expiryDateTime, setExpiryDateTime] = useState('');
   const [questions, setQuestions] = useState([]);
+
+  // Search Query for Student Progress Panel
+  const [studentSearchQuery, setStudentSearchQuery] = useState('');
 
   // Question Form Fields
   const [qText, setQText] = useState('');
@@ -24,19 +71,65 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
   const [marks, setMarks] = useState(5);
   const [editQId, setEditQId] = useState(null);
 
+  // Real-time check if deadline has lapsed/expired
+  const isDeadlineExpired = Boolean(
+    expiryDateTime && new Date(expiryDateTime).getTime() <= currentTime
+  );
+
   // Teacher Specific Filter
   const myCreatedTests = tests.filter((t) => t.teacherId === user.id);
   const publishedCount = myCreatedTests.filter((t) => t.status === 'published').length;
   const draftCount = myCreatedTests.filter((t) => t.status === 'draft').length;
 
   const myTestResults = results.filter((r) =>
-    myCreatedTests.some((t) => t.title === r.testName && t.subject === r.subject)
+    myCreatedTests.some((t) => (t.id && r.testId ? t.id === r.testId : (t.title === r.testName && t.subject === r.subject)))
   );
 
   const totalCalculatedMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0);
 
-  // Direct Publish from Dashboard
+  // Strict Programmatic Validation for Expiry Date & Time
+  const validateExpiryDateTime = () => {
+    const errorMessage = 'Invalid Expiry Deadline: You cannot select a past date or time. Please select a future date and time.';
+
+    if (!expiryDateTime) {
+      setExpiryError(errorMessage);
+      alert(errorMessage);
+      if (wizardStep !== 1) {
+        setWizardStep(1);
+      }
+      setTimeout(() => {
+        expiryInputRef.current?.focus();
+      }, 50);
+      return false;
+    }
+
+    const expiryTimestamp = new Date(expiryDateTime).getTime();
+    const isPast = isNaN(expiryTimestamp) || expiryTimestamp <= Date.now();
+
+    if (isPast) {
+      setExpiryError(errorMessage);
+      alert(errorMessage);
+      if (wizardStep !== 1) {
+        setWizardStep(1);
+      }
+      setTimeout(() => {
+        expiryInputRef.current?.focus();
+      }, 50);
+      return false;
+    }
+
+    setExpiryError('');
+    return true;
+  };
+
+  // Direct Publish from Dashboard Table
   const handleDirectPublish = (testId, testTitle) => {
+    const targetTest = tests.find((t) => t.id === testId);
+    if (targetTest?.expiryDateTime && new Date(targetTest.expiryDateTime).getTime() <= currentTime) {
+      alert('Invalid Expiry Deadline: You cannot publish a test with an expired deadline. Please edit the test and select a future date and time.');
+      return;
+    }
+
     if (window.confirm(`Are you sure you want to publish "${testTitle}" for students now?`)) {
       setTests((prev) =>
         prev.map((t) => (t.id === testId ? { ...t, status: 'published' } : t))
@@ -49,28 +142,58 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
   const handleEditDraftTest = (testObj) => {
     setEditingTestId(testObj.id);
     setTitle(testObj.title);
-    setSubject(testObj.subject);
     setDescription(testObj.description || '');
     setDuration(testObj.duration || 15);
+    const formattedExpiry = testObj.expiryDateTime ? formatDateTimeForInput(testObj.expiryDateTime) : '';
+    setExpiryDateTime(formattedExpiry);
     setQuestions(testObj.questions || []);
     setWizardStep(1);
     setActiveTab('createTest');
+
+    // Immediately flag if existing draft deadline has lapsed
+    if (formattedExpiry && new Date(formattedExpiry).getTime() <= Date.now()) {
+      setExpiryError('Invalid Expiry Deadline: You cannot select a past date or time. Please select a future date and time.');
+    } else {
+      setExpiryError('');
+    }
   };
 
   const resetForm = () => {
     setTitle('');
-    setSubject('');
     setDescription('');
     setDuration(15);
+    setExpiryDateTime('');
+    setExpiryError('');
     setQuestions([]);
     setEditingTestId(null);
     setWizardStep(1);
   };
 
+  // Handle DateTime input change
+  const handleExpiryChange = (e) => {
+    const val = e.target.value;
+    setExpiryDateTime(val);
+
+    if (!val) {
+      setExpiryError('Invalid Expiry Deadline: You cannot select a past date or time. Please select a future date and time.');
+      return;
+    }
+
+    const t = new Date(val).getTime();
+    if (isNaN(t) || t <= Date.now()) {
+      setExpiryError('Invalid Expiry Deadline: You cannot select a past date or time. Please select a future date and time.');
+    } else {
+      setExpiryError('');
+    }
+  };
+
   // Step 1 -> Step 2
   const handleProceedToQuestions = () => {
-    if (!title.trim() || !subject.trim()) {
-      alert('Please enter Test Title & Subject!');
+    if (!title.trim()) {
+      alert('Please enter Test Title!');
+      return;
+    }
+    if (!validateExpiryDateTime()) {
       return;
     }
     setWizardStep(2);
@@ -160,12 +283,21 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
       return;
     }
 
+    if (!validateExpiryDateTime()) {
+      return;
+    }
+
     setWizardStep(3);
   };
 
   // Final Save / Publish
   const handleSaveTest = (status) => {
+    if (!validateExpiryDateTime()) {
+      return;
+    }
+
     const finalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0);
+    const isoExpiry = expiryDateTime ? new Date(expiryDateTime).toISOString() : '';
 
     if (editingTestId) {
       setTests((prev) =>
@@ -174,9 +306,10 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
             ? {
                 ...t,
                 title,
-                subject,
-                description: description || 'Comprehensive assessment',
+                subject: teacherAssignedSubject,
+                description: description.trim() || 'Comprehensive subject knowledge assessment.',
                 duration: parseInt(duration),
+                expiryDateTime: isoExpiry,
                 totalMarks: finalMarks,
                 status,
                 questions: [...questions]
@@ -191,9 +324,10 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
         teacherId: user.id,
         teacherName: user.name,
         title,
-        subject,
-        description: description || 'Comprehensive assessment',
+        subject: teacherAssignedSubject,
+        description: description.trim() || 'Comprehensive subject knowledge assessment.',
         duration: parseInt(duration),
+        expiryDateTime: isoExpiry,
         totalMarks: finalMarks,
         status,
         questions: [...questions]
@@ -233,7 +367,8 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
     background: '#ffffff',
     outline: 'none',
     boxSizing: 'border-box',
-    marginTop: '6px'
+    marginTop: '6px',
+    transition: 'border-color 0.2s, box-shadow 0.2s'
   };
 
   const labelStyle = {
@@ -504,31 +639,59 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
                           <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Subject</th>
                           <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Questions</th>
                           <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Duration</th>
+                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Deadline</th>
                           <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Status</th>
                           <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800', textAlign: 'right' }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {myCreatedTests.map((t) => (
-                          <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                            <td style={{ padding: '16px 18px', fontWeight: '700', color: '#0f172a' }}>{t.title}</td>
-                            <td style={{ padding: '16px 18px', color: '#4f46e5', fontWeight: '600' }}>{t.subject}</td>
-                            <td style={{ padding: '16px 18px', color: '#475569' }}>{t.questions.length} Qs</td>
-                            <td style={{ padding: '16px 18px', color: '#475569' }}>{t.duration} mins</td>
-                            <td style={{ padding: '16px 18px' }}>
-                              <span
-                                style={{
-                                  background: t.status === 'published' ? '#ede9fe' : '#fef3c7',
-                                  color: t.status === 'published' ? '#4338ca' : '#b45309',
-                                  padding: '5px 12px',
-                                  borderRadius: '999px',
-                                  fontSize: '12px',
-                                  fontWeight: '800'
-                                }}
-                              >
-                                {t.status.toUpperCase()}
-                              </span>
-                            </td>
+                        {myCreatedTests.map((t) => {
+                          const isExpired = t.expiryDateTime && currentTime >= new Date(t.expiryDateTime).getTime();
+                          return (
+                            <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '16px 18px', fontWeight: '700', color: '#0f172a' }}>
+                                <div>{t.title}</div>
+                                {t.description && (
+                                  <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '500', marginTop: '2px', maxWidth: '240px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.description}>
+                                    {t.description}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: '16px 18px', color: '#4f46e5', fontWeight: '600' }}>{t.subject}</td>
+                              <td style={{ padding: '16px 18px', color: '#475569' }}>{t.questions.length} Qs</td>
+                              <td style={{ padding: '16px 18px', color: '#475569' }}>{t.duration} mins</td>
+                              <td style={{ padding: '16px 18px', fontSize: '13px', color: isExpired ? '#dc2626' : '#475569', fontWeight: isExpired ? '700' : '500' }}>
+                                {t.expiryDateTime ? new Date(t.expiryDateTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'No Deadline'}
+                              </td>
+                              <td style={{ padding: '16px 18px' }}>
+                                {isExpired ? (
+                                  <span
+                                    style={{
+                                      background: '#fee2e2',
+                                      color: '#991b1b',
+                                      padding: '5px 12px',
+                                      borderRadius: '999px',
+                                      fontSize: '12px',
+                                      fontWeight: '800'
+                                    }}
+                                  >
+                                    EXPIRED
+                                  </span>
+                                ) : (
+                                  <span
+                                    style={{
+                                      background: t.status === 'published' ? '#ede9fe' : '#fef3c7',
+                                      color: t.status === 'published' ? '#4338ca' : '#b45309',
+                                      padding: '5px 12px',
+                                      borderRadius: '999px',
+                                      fontSize: '12px',
+                                      fontWeight: '800'
+                                    }}
+                                  >
+                                    {t.status.toUpperCase()}
+                                  </span>
+                                )}
+                              </td>
                             
                             <td style={{ padding: '16px 18px', textAlign: 'right' }}>
                               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end' }}>
@@ -537,18 +700,18 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
                                     onClick={() => handleDirectPublish(t.id, t.title)}
                                     title="Publish this test"
                                     style={{
-                                      background: '#10b981',
+                                      background: isExpired ? '#94a3b8' : '#10b981',
                                       color: '#ffffff',
                                       border: 'none',
                                       padding: '7px 14px',
                                       borderRadius: '8px',
                                       fontSize: '12px',
                                       fontWeight: '800',
-                                      cursor: 'pointer',
+                                      cursor: isExpired ? 'not-allowed' : 'pointer',
                                       display: 'inline-flex',
                                       alignItems: 'center',
                                       gap: '4px',
-                                      boxShadow: '0 2px 6px rgba(16, 185, 129, 0.25)'
+                                      boxShadow: isExpired ? 'none' : '0 2px 6px rgba(16, 185, 129, 0.25)'
                                     }}
                                   >
                                     🚀 Publish
@@ -596,8 +759,9 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
                                 </button>
                               </div>
                             </td>
-                          </tr>
-                        ))}
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -664,12 +828,18 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
                 <div style={{ flex: 1, height: '2px', background: '#e2e8f0', margin: '0 16px' }} />
 
                 <div
-                  onClick={() => { if (title && subject) setWizardStep(2); }}
+                  onClick={() => {
+                    if (wizardStep === 1) {
+                      handleProceedToQuestions();
+                    } else {
+                      setWizardStep(2);
+                    }
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: '10px',
-                    cursor: title && subject ? 'pointer' : 'not-allowed',
+                    cursor: 'pointer',
                     color: wizardStep === 2 ? '#4f46e5' : wizardStep > 2 ? '#10b981' : '#94a3b8',
                     fontWeight: '800',
                     fontSize: '14px'
@@ -696,7 +866,18 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
                 <div style={{ flex: 1, height: '2px', background: '#e2e8f0', margin: '0 16px' }} />
 
                 <div
-                  onClick={handleProceedToPreview}
+                  onClick={() => {
+                    if (wizardStep === 1) {
+                      if (!title.trim()) {
+                        alert('Please enter Test Title!');
+                        return;
+                      }
+                      if (!validateExpiryDateTime()) {
+                        return;
+                      }
+                    }
+                    handleProceedToPreview();
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -729,6 +910,33 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
               {/* STEP 1: TEST DETAILS */}
               {wizardStep === 1 && (
                 <div style={cardStyle}>
+                  {/* Immediate Alert Banner if editing a draft with expired deadline */}
+                  {editingTestId && isDeadlineExpired && (
+                    <div
+                      style={{
+                        background: '#fff1f2',
+                        border: '1.5px solid #fecdd3',
+                        borderRadius: '14px',
+                        padding: '14px 18px',
+                        marginBottom: '22px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        color: '#9f1239'
+                      }}
+                    >
+                      <span style={{ fontSize: '20px' }}>⚠️</span>
+                      <div>
+                        <strong style={{ fontSize: '13px', display: 'block', color: '#b91c1c' }}>
+                          ⚠️ Deadline Expired - Update to a future date before publishing.
+                        </strong>
+                        <span style={{ fontSize: '12px', color: '#e11d48' }}>
+                          The previous deadline for this test has already lapsed. Please choose a future date and time below to proceed.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#0f172a', margin: '0 0 20px 0' }}>
                     1. Basic Test Details
                   </h3>
@@ -746,38 +954,137 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
                       />
                     </div>
                     <div>
-                      <label style={labelStyle}>Subject *</label>
+                      <label style={labelStyle}>
+                        Assigned Subject <span style={{ fontSize: '11px', color: '#6366f1', fontWeight: '600' }}>(Predefined & Locked)</span>
+                      </label>
                       <input
                         type="text"
-                        placeholder="e.g. Web Development"
-                        value={subject}
-                        onChange={(e) => setSubject(e.target.value)}
-                        style={inputStyle}
-                        required
+                        value={teacherAssignedSubject}
+                        readOnly
+                        disabled
+                        style={{
+                          ...inputStyle,
+                          background: '#f1f5f9',
+                          color: '#475569',
+                          cursor: 'not-allowed',
+                          fontWeight: '700',
+                          border: '1.5px solid #cbd5e1'
+                        }}
                       />
+                      <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#64748b' }}>
+                        🔒 Subject is permanently assigned to your teacher profile.
+                      </p>
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '18px' }}>
                     <div>
-                      <label style={labelStyle}>Test Description</label>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <label style={labelStyle}>Test Expiration Deadline *</label>
+                        {isDeadlineExpired && (
+                          <span
+                            style={{
+                              background: '#fee2e2',
+                              color: '#991b1b',
+                              border: '1px solid #fca5a5',
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              fontSize: '11px',
+                              fontWeight: '800'
+                            }}
+                          >
+                            Expired
+                          </span>
+                        )}
+                      </div>
                       <input
-                        type="text"
-                        placeholder="e.g. Comprehensive core subject questions"
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
-                        style={inputStyle}
+                        ref={expiryInputRef}
+                        type="datetime-local"
+                        min={currentMinDateTime}
+                        value={expiryDateTime}
+                        onChange={handleExpiryChange}
+                        style={{
+                          ...inputStyle,
+                          borderColor: (expiryError || isDeadlineExpired) ? '#ef4444' : '#cbd5e1',
+                          boxShadow: (expiryError || isDeadlineExpired) ? '0 0 0 3px rgba(239, 68, 68, 0.15)' : 'none'
+                        }}
+                        required
                       />
+
+                      {/* Warning Badge for lapsed draft deadline */}
+                      {isDeadlineExpired && (
+                        <div
+                          style={{
+                            marginTop: '8px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: '#fee2e2',
+                            border: '1px solid #fca5a5',
+                            color: '#991b1b',
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            fontWeight: '800'
+                          }}
+                        >
+                          ⚠️ Deadline Expired - Update to a future date before publishing.
+                        </div>
+                      )}
+
+                      {/* Inline Error Message */}
+                      {expiryError && (
+                        <div
+                          style={{
+                            marginTop: '6px',
+                            color: '#dc2626',
+                            fontSize: '12px',
+                            fontWeight: '700',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          <span>❌</span>
+                          <span>{expiryError}</span>
+                        </div>
+                      )}
+
+                      <p style={{ margin: '6px 0 0 0', fontSize: '11px', color: '#64748b' }}>
+                        📅 Students cannot start this test after this date & time deadline.
+                      </p>
                     </div>
                     <div>
-                      <label style={labelStyle}>Duration (Minutes)</label>
+                      <label style={labelStyle}>Duration (Minutes) *</label>
                       <input
                         type="number"
                         value={duration}
                         onChange={(e) => setDuration(e.target.value)}
                         style={inputStyle}
+                        min="1"
+                        required
                       />
                     </div>
+                  </div>
+
+                  <div style={{ marginBottom: '24px' }}>
+                    <label style={labelStyle}>Test Description / Instructions</label>
+                    <textarea
+                      rows={3}
+                      placeholder="e.g., Covers units 1 to 3, negative marking rules, or prerequisites."
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      style={{
+                        ...inputStyle,
+                        minHeight: '85px',
+                        resize: 'vertical',
+                        fontFamily: 'inherit',
+                        lineHeight: '1.5'
+                      }}
+                    />
+                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#64748b' }}>
+                      💡 Clearly outline syllabus scope, instructions, or negative marking rules for students.
+                    </p>
                   </div>
 
                   <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -884,7 +1191,7 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
                     {editQId ? '💾 Update Question' : '➕ Save & Add This Question'}
                   </button>
 
-                  {/* Configured Questions Table (✨ Clean Inline-Aligned & No Wrap ✨) */}
+                  {/* Configured Questions Table */}
                   {questions.length > 0 && (
                     <div style={{ marginTop: '28px' }}>
                       <h4 style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', marginBottom: '14px' }}>
@@ -907,14 +1214,12 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
                                 <td style={{ padding: '14px 16px', fontWeight: '800', color: '#0f172a' }}>Q{idx + 1}</td>
                                 <td style={{ padding: '14px 16px', color: '#1e293b', lineHeight: 1.4 }}>{q.questionText}</td>
                                 
-                                {/* Single Line Marks Pill */}
                                 <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
                                   <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '14px' }}>
                                     {q.marks} <span style={{ fontWeight: '600', color: '#64748b', fontSize: '12px' }}>Marks</span>
                                   </span>
                                 </td>
 
-                                {/* Single Line Option Badge */}
                                 <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
                                   <span
                                     style={{
@@ -934,7 +1239,6 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
                                   </span>
                                 </td>
 
-                                {/* Compact Row Actions */}
                                 <td style={{ padding: '14px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                                   <div style={{ display: 'inline-flex', gap: '8px', alignItems: 'center' }}>
                                     <button
@@ -980,22 +1284,78 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
               {wizardStep === 3 && (
                 <div>
                   <div style={cardStyle}>
+                    {/* Warning banner in Step 3 if deadline is expired */}
+                    {isDeadlineExpired && (
+                      <div
+                        style={{
+                          background: '#fff1f2',
+                          border: '1.5px solid #fecdd3',
+                          borderRadius: '14px',
+                          padding: '12px 18px',
+                          marginBottom: '18px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          color: '#9f1239'
+                        }}
+                      >
+                        <span style={{ fontSize: '20px' }}>⚠️</span>
+                        <span style={{ fontSize: '13px', fontWeight: '800', color: '#b91c1c' }}>
+                          ⚠️ Deadline Expired - Update to a future date before publishing.
+                        </span>
+                      </div>
+                    )}
+
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                       <span style={{ fontSize: '12px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.6px' }}>TEST PREVIEW</span>
                       <span style={{ background: '#fef3c7', color: '#b45309', padding: '4px 12px', borderRadius: '999px', fontSize: '12px', fontWeight: '800' }}>Draft</span>
                     </div>
 
-                    <h2 style={{ fontSize: '22px', fontWeight: '800', color: '#0f172a', margin: '0 0 6px 0' }}>{title}</h2>
-                    <p style={{ color: '#64748b', fontSize: '14px', margin: '0 0 20px 0' }}>{description || 'Comprehensive test'}</p>
+                    <h2 style={{ fontSize: '22px', fontWeight: '800', color: '#0f172a', margin: '0 0 8px 0' }}>{title}</h2>
+                    <p
+                      style={{
+                        color: '#64748b',
+                        fontSize: '14px',
+                        lineHeight: '1.5',
+                        margin: '0 0 20px 0',
+                        whiteSpace: 'pre-line'
+                      }}
+                    >
+                      {description?.trim() || 'Comprehensive subject knowledge assessment.'}
+                    </p>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', background: '#f8fafc', padding: '18px 22px', borderRadius: '14px', border: '1.5px solid #e2e8f0', marginBottom: '20px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px', background: '#f8fafc', padding: '18px 22px', borderRadius: '14px', border: '1.5px solid #e2e8f0', marginBottom: '20px' }}>
                       <div>
                         <div style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Subject</div>
-                        <div style={{ fontWeight: '800', fontSize: '15px', marginTop: '4px', color: '#0f172a' }}>{subject}</div>
+                        <div style={{ fontWeight: '800', fontSize: '15px', marginTop: '4px', color: '#0f172a' }}>{teacherAssignedSubject}</div>
                       </div>
                       <div>
                         <div style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Duration</div>
                         <div style={{ fontWeight: '800', fontSize: '15px', marginTop: '4px', color: '#0f172a' }}>{duration} mins</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Deadline</div>
+                        <div style={{ fontWeight: '800', fontSize: '14px', marginTop: '4px', color: isDeadlineExpired ? '#dc2626' : '#0f172a' }}>
+                          {expiryDateTime ? new Date(expiryDateTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Not Set'}
+                        </div>
+                        {isDeadlineExpired && (
+                          <div style={{ marginTop: '4px' }}>
+                            <span
+                              style={{
+                                background: '#fee2e2',
+                                color: '#991b1b',
+                                border: '1px solid #fca5a5',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                fontSize: '11px',
+                                fontWeight: '800',
+                                display: 'inline-block'
+                              }}
+                            >
+                              ⚠️ Expired
+                            </span>
+                          </div>
+                        )}
                       </div>
                       <div>
                         <div style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Questions</div>
@@ -1098,76 +1458,217 @@ export default function TeacherDashboard({ user, tests, setTests, results, onLog
           )}
 
           {/* TAB 3: STUDENT SUBMISSIONS */}
-          {activeTab === 'activity' && (
-            <div>
-              <div style={{ marginBottom: '24px' }}>
-                <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0' }}>Student Submissions</h1>
-                <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>
-                  Review all student attempts and scores on tests created by you ({user.name}).
-                </p>
-              </div>
+          {activeTab === 'activity' && (() => {
+            const filteredTestResults = myTestResults.filter((r) => {
+              if (!studentSearchQuery.trim()) return true;
+              return r.studentName && r.studentName.toLowerCase().includes(studentSearchQuery.trim().toLowerCase());
+            });
 
-              <div style={cardStyle}>
-                {myTestResults.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
-                    No students have submitted your tests yet.
-                  </div>
-                ) : (
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', textAlign: 'left' }}>
-                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Student Name</th>
-                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Test & Subject</th>
-                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Timing</th>
-                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Questions (Att./Unatt.)</th>
-                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Score</th>
-                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Percentage</th>
-                          <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {myTestResults.map((r) => (
-                          <tr key={r.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                            <td style={{ padding: '16px 18px', fontWeight: '700', color: '#0f172a' }}>{r.studentName}</td>
-                            <td style={{ padding: '16px 18px' }}>
-                              <strong>{r.testName}</strong>
-                              <br />
-                              <span style={{ color: '#4f46e5', fontSize: '12px', fontWeight: '600' }}>{r.subject}</span>
-                            </td>
-                            <td style={{ padding: '16px 18px', color: '#475569', fontSize: '13px' }}>
-                              {r.startTime} - {r.endTime}
-                            </td>
-                            <td style={{ padding: '16px 18px', fontSize: '13px' }}>
-                              Total: {r.totalQuestions} ({r.attempted}/{r.unanswered})
-                            </td>
-                            <td style={{ padding: '16px 18px', fontWeight: '800', color: '#0f172a' }}>
-                              {r.marksObtained} / {r.totalMarks}
-                            </td>
-                            <td style={{ padding: '16px 18px', fontWeight: '800', color: '#4f46e5' }}>{r.percentage}%</td>
-                            <td style={{ padding: '16px 18px' }}>
-                              <span
-                                style={{
-                                  background: r.status === 'Pass' ? '#dcfce7' : '#fee2e2',
-                                  color: r.status === 'Pass' ? '#15803d' : '#991b1b',
-                                  padding: '5px 12px',
-                                  borderRadius: '999px',
-                                  fontSize: '12px',
-                                  fontWeight: '800'
-                                }}
-                              >
-                                {r.status.toUpperCase()}
-                              </span>
-                            </td>
+            return (
+              <div>
+                <div style={{ marginBottom: '24px' }}>
+                  <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0' }}>Student Submissions</h1>
+                  <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>
+                    Review all student attempts and scores on tests created by you ({user.name}).
+                  </p>
+                </div>
+
+                {/* Search Bar Toolbar */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                    marginBottom: '20px',
+                    flexWrap: 'wrap'
+                  }}
+                >
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      setStudentSearchQuery(studentSearchQuery.trim());
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, maxWidth: '520px' }}
+                  >
+                    <div style={{ position: 'relative', flex: 1 }}>
+                      <input
+                        type="text"
+                        placeholder="Search student by name (e.g. Radha Patil)..."
+                        value={studentSearchQuery}
+                        onChange={(e) => setStudentSearchQuery(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '11px 16px 11px 40px',
+                          border: '1.5px solid #cbd5e1',
+                          borderRadius: '12px',
+                          fontSize: '14px',
+                          color: '#0f172a',
+                          background: '#ffffff',
+                          outline: 'none',
+                          boxSizing: 'border-box',
+                          transition: 'border-color 0.2s'
+                        }}
+                        onFocus={(e) => (e.target.style.borderColor = '#4f46e5')}
+                        onBlur={(e) => (e.target.style.borderColor = '#cbd5e1')}
+                      />
+                      <span
+                        style={{
+                          position: 'absolute',
+                          left: '14px',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          fontSize: '16px',
+                          color: '#94a3b8',
+                          pointerEvents: 'none'
+                        }}
+                      >
+                        🔍
+                      </span>
+                    </div>
+
+                    <button
+                      type="submit"
+                      style={{
+                        background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)',
+                        color: '#ffffff',
+                        border: 'none',
+                        padding: '11px 22px',
+                        borderRadius: '12px',
+                        fontSize: '14px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      Search
+                    </button>
+
+                    {studentSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setStudentSearchQuery('')}
+                        style={{
+                          background: '#f1f5f9',
+                          color: '#475569',
+                          border: '1.5px solid #e2e8f0',
+                          padding: '11px 16px',
+                          borderRadius: '12px',
+                          fontSize: '14px',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        ✕ Clear
+                      </button>
+                    )}
+                  </form>
+
+                  {myTestResults.length > 0 && (
+                    <div style={{ fontSize: '13px', fontWeight: '700', color: '#64748b' }}>
+                      Showing {filteredTestResults.length} of {myTestResults.length} submissions
+                    </div>
+                  )}
+                </div>
+
+                <div style={cardStyle}>
+                  {myTestResults.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                      No students have submitted your tests yet.
+                    </div>
+                  ) : filteredTestResults.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '48px 24px', color: '#64748b' }}>
+                      <div style={{ fontSize: '36px', marginBottom: '12px' }}>🔍</div>
+                      <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#0f172a', margin: '0 0 6px 0' }}>
+                        No records found for the searched student.
+                      </h3>
+                      <p style={{ fontSize: '14px', margin: '0 0 16px 0', color: '#64748b' }}>
+                        No student submissions match "{studentSearchQuery}". Try clearing the search or checking the name.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setStudentSearchQuery('')}
+                        style={{
+                          background: '#f1f5f9',
+                          color: '#475569',
+                          border: '1.5px solid #cbd5e1',
+                          padding: '8px 18px',
+                          borderRadius: '10px',
+                          fontSize: '13px',
+                          fontWeight: '700',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Clear Search
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', textAlign: 'left' }}>
+                            <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Student Name</th>
+                            <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Test & Subject</th>
+                            <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Timing</th>
+                            <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Questions (Att./Unatt.)</th>
+                            <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Score</th>
+                            <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Percentage</th>
+                            <th style={{ padding: '14px 18px', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '800' }}>Status</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                        </thead>
+                        <tbody>
+                          {filteredTestResults.map((r) => (
+                            <tr key={r.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '16px 18px', fontWeight: '700', color: '#0f172a' }}>{r.studentName}</td>
+                              <td style={{ padding: '16px 18px' }}>
+                                <strong>{r.testName}</strong>
+                                <br />
+                                <span style={{ color: '#4f46e5', fontSize: '12px', fontWeight: '600' }}>{r.subject}</span>
+                              </td>
+                              <td style={{ padding: '16px 18px', color: '#475569', fontSize: '13px' }}>
+                                {r.startTime && r.startTime !== 'N/A' ? (
+                                  `${r.startTime} - ${r.endTime}`
+                                ) : (
+                                  <span style={{ color: '#ef4444', fontWeight: '600' }}>{r.note || 'Expired'}</span>
+                                )}
+                              </td>
+                              <td style={{ padding: '16px 18px', fontSize: '13px' }}>
+                                {r.note ? (
+                                  <span style={{ color: '#64748b' }}>Not attempted ({r.totalQuestions} Qs)</span>
+                                ) : (
+                                  `Total: ${r.totalQuestions} (${r.attempted}/${r.unanswered})`
+                                )}
+                              </td>
+                              <td style={{ padding: '16px 18px', fontWeight: '800', color: '#0f172a' }}>
+                                {r.marksObtained} / {r.totalMarks}
+                              </td>
+                              <td style={{ padding: '16px 18px', fontWeight: '800', color: '#4f46e5' }}>{r.percentage}%</td>
+                              <td style={{ padding: '16px 18px' }}>
+                                <span
+                                  style={{
+                                    background: r.status === 'Pass' ? '#dcfce7' : '#fee2e2',
+                                    color: r.status === 'Pass' ? '#15803d' : '#991b1b',
+                                    padding: '5px 12px',
+                                    borderRadius: '999px',
+                                    fontSize: '12px',
+                                    fontWeight: '800'
+                                  }}
+                                >
+                                  {r.status.toUpperCase()}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </main>
       </div>
     </div>
